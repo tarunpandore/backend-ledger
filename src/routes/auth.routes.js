@@ -17,4 +17,11 @@ router.post('/register', authController.userRegisterController);
  */
 router.post('/login', authController.userLoginController);
 
-module.exports = router;
+/**
+ * @route   POST /api/auth/logout
+ * @desc    Log out user by invalidating JWT token & clearing auth cookie
+ * @access  Public
+ */
+router.post('/logout', authController.userLogoutController);
+
+module.exports = router;

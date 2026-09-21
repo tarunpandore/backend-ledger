@@ -1,6 +1,7 @@
 const userModel = require('../models/user.model');
 const jwt = require('jsonwebtoken');
 const emailService = require('../services/email.service');
+const tokenBlackListModel = require('../models/blackList.model');
 
 /**
  * ============================================================================
@@ -128,7 +129,53 @@ async function userLoginController(req, res) {
     });
 }
 
+
+/**
+ * User Logout
+ *
+ * Flow:
+ * 1. Extract token from HTTP-only cookie or Authorization Bearer header
+ * 2. If token is missing, return 400 Bad Request
+ * 3. Store the token in the token blacklist to invalidate further use
+ * 4. Clear the 'token' cookie from the client response
+ * 5. Return success confirmation
+ */
+async function userLogoutController(req, res) {
+    const token = req.cookies.token || req.headers.authorization?.split(" ")[1];
+
+    if (!token) {
+        return res.status(400).json({
+            message: "Token is required to logout"
+        });
+    }
+
+    try {
+        await tokenBlackListModel.updateOne(
+            { token },
+            { $setOnInsert: { token } },
+            { upsert: true }
+        );
+
+        res.clearCookie('token', {
+            httpOnly: true,
+            secure: process.env.MODE === 'PRODUCTION',
+            sameSite: 'strict'
+        });
+
+        return res.status(200).json({
+            message: "User logged out successfully"
+        });
+    } catch (error) {
+        return res.status(500).json({
+            message: "Failed to logout user",
+            error: error.message
+        });
+    }
+}
+
 module.exports = {
     userRegisterController,
     userLoginController,
-};
+    userLogoutController
+};
+

@@ -1,43 +1,33 @@
-const mongoose = require('mongoose');
-
-const accountModel = require('../models/account.model');
-const transactionModel = require('../models/transaction.model');
-const ledgerModel = require('../models/ledger.model');
-const emailService = require('../services/email.service');
+const mongoose = require("mongoose");
+const transactionModel = require("../models/transaction.model");
+const ledgerModel = require("../models/ledger.model");
+const accountModel = require("../models/account.model");
+const emailService = require("../services/email.service");
 
 /**
  * ============================================================================
  * TRANSACTION CONTROLLER
  * ============================================================================
  *
- * Implements a production-grade financial transfer flow utilizing:
- * 1. Double-Entry Bookkeeping (every transfer has equal DEBIT and CREDIT ledger entries)
- * 2. ACID Transactions via MongoDB Sessions (all operations commit together or abort)
- * 3. Idempotency Key Pattern (prevents duplicate charges on retries/network glitches)
- * 4. Real-time balance derivation (computed from ledger history, not mutable state)
- * 5. Asynchronous transaction notifications via Nodemailer
+ * Implements double-entry ledger bookkeeping transfers with MongoDB ACID transactions.
+ *
+ * The 10-Step Transfer Flow:
+ * 1. Validate request payload & ensure sender/recipient accounts are different
+ * 2. Validate idempotency key to prevent double-charging or race conditions
+ * 3. Verify accounts exist and account statuses are ACTIVE
+ * 4. Derive sender balance in real-time from ledger aggregation
+ * 5. Initialize atomic MongoDB ACID session
+ * 6. Create Transaction record in PENDING status
+ * 7. Post DEBIT ledger entry on sender account
+ * 8. Post CREDIT ledger entry on recipient account
+ * 9. Update Transaction status to COMPLETED and commit session
+ * 10. Send asynchronous email notification to sender
  */
 
 /**
- * Create a new transfer between two accounts
+ * User-to-User Transfer Execution
  *
- * STEP-BY-STEP LIFECYCLE:
- * 1. Request Validation: Ensure fromAccount, toAccount, amount, and idempotencyKey exist.
- * 2. Idempotency Check: Verify if this idempotency key was already submitted.
- *    - If COMPLETED: return existing transaction immediately (safe retry).
- *    - If PENDING: return 200 informing client it's currently processing.
- *    - If FAILED/REVERSED: inform client to retry with new key or resolve issue.
- * 3. Account Verification: Verify both accounts exist and their status is "ACTIVE".
- * 4. Balance Derivation: Calculate real-time sender balance via ledger aggregation.
- *    Reject if balance < amount (insufficient funds).
- * 5. ACID Transaction Session:
- *    a. Create Transaction record with status "PENDING"
- *    b. Post DEBIT ledger record for fromAccount
- *    c. [Simulated processing latency: 15s to demonstrate PENDING idempotency state]
- *    d. Post CREDIT ledger record for toAccount
- *    e. Update Transaction status to "COMPLETED"
- *    f. Commit session atomically
- * 6. Notification: Send transaction confirmation email to the user.
+ * Executes an atomic transfer between two accounts with double-entry ledger postings.
  */
 async function createTransaction(req, res) {
     /**
@@ -108,7 +98,7 @@ async function createTransaction(req, res) {
     }
 
     /**
-     * 3. Check account status (both must be ACTIVE)
+     * 3. Check account status (both sender and receiver accounts must be ACTIVE)
      */
     if (fromUserAccount.status !== "ACTIVE" || toUserAccount.status !== "ACTIVE") {
         return res.status(400).json({
@@ -173,10 +163,10 @@ async function createTransaction(req, res) {
             { session, new: true }
         );
 
-        // 5f. Commit all changes atomically
+        // 5f. Commit all operations atomically
         await session.commitTransaction();
     } catch (error) {
-        // Rollback all pending operations in this session if any error occurs
+        // Rollback all pending operations in this session if an error occurs
         if (session) {
             await session.abortTransaction();
         }
@@ -308,4 +298,3 @@ module.exports = {
     createTransaction,
     createInitialFundsTransaction
 };
-
