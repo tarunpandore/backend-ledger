@@ -143,10 +143,14 @@ async function createTransaction(req, res) {
             type: "DEBIT"
         }], { session });
 
-        // 5c. Simulated latency (15s delay):
-        // Intentionally demonstrates how concurrent duplicate requests encounter
-        // the "PENDING" state and prevent double spending / race conditions.
-        await new Promise((resolve) => setTimeout(resolve, 15 * 1000));
+        // 5c. Simulated latency (15s delay in production/dev; bypassable in test mode):
+        // Demonstrates how concurrent duplicate requests encounter the "PENDING" state
+        const simulatedDelay = process.env.NODE_ENV === 'test'
+            ? (process.env.TEST_TRANSACTION_DELAY_MS ? parseInt(process.env.TEST_TRANSACTION_DELAY_MS) : 0)
+            : 15 * 1000;
+        if (simulatedDelay > 0) {
+            await new Promise((resolve) => setTimeout(resolve, simulatedDelay));
+        }
 
         // 5d. Post CREDIT entry to creditor's ledger
         await ledgerModel.create([{

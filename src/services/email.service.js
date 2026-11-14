@@ -21,19 +21,24 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-// Verify connection configuration with SMTP server on startup
-transporter.verify((error, success) => {
-  if (error) {
-    console.error('Email server connection status:', error.message);
-  } else {
-    console.log('Email server is ready to send messages');
-  }
-});
+// Verify connection configuration with SMTP server on startup (skipped in test mode)
+if (process.env.NODE_ENV !== 'test') {
+  transporter.verify((error, success) => {
+    if (error) {
+      console.error('Email server connection status:', error.message);
+    } else {
+      console.log('Email server is ready to send messages');
+    }
+  });
+}
 
 /**
  * Internal helper to send emails
  */
 const sendEmail = async (to, subject, text, html) => {
+  if (process.env.NODE_ENV === 'test') {
+    return { messageId: 'mock-test-email-id' };
+  }
   try {
     const info = await transporter.sendMail({
       from: `"Backend Ledger" <${process.env.EMAIL_USER}>`,
