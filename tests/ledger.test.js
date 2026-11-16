@@ -247,28 +247,48 @@ describe('3. Double-Entry Bookkeeping & ACID Transactions', () => {
     expect(await accountA.getBalance()).toBe(700);
   });
 
-  test('ACID Rollback: Failure during transaction aborts session with zero orphan entries', async () => {
-    const fakeRecipientId = new mongoose.Types.ObjectId();
+  test('ACID Rollback: Mid-flight failure during transaction aborts session with zero orphan entries', async () => {
     const failedPayload = {
       fromAccount: accountA._id.toString(),
-      toAccount: fakeRecipientId.toString(),
+      toAccount: accountB._id.toString(),
       amount: 100,
       idempotencyKey: 'fail-rollback-test-key-01',
     };
+
+    // Simulate mid-flight database error during the second ledger write (CREDIT entry)
+    let callCount = 0;
+    const originalCreate = ledgerModel.create;
+    jest.spyOn(ledgerModel, 'create').mockImplementation(async function (...args) {
+      callCount++;
+      if (callCount === 2) {
+        throw new Error('Simulated database write failure during CREDIT posting');
+      }
+      return originalCreate.apply(ledgerModel, args);
+    });
 
     const res = await request(app)
       .post('/api/transaction')
       .set('Authorization', `Bearer ${systemToken}`)
       .send(failedPayload);
 
-    expect(res.status).toBe(400);
+    // Restore spy
+    ledgerModel.create.mockRestore();
 
-    // No ledger entries should exist for this failed key
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/transaction is pending due to some issue/i);
+
+    // Verify ACID rollback: The PENDING transaction created at step 5a must be rolled back
     const orphanedTx = await transactionModel.findOne({ idempotencyKey: failedPayload.idempotencyKey });
     expect(orphanedTx).toBeNull();
 
-    // Sender balance remains intact at 700
-    expect(await accountA.getBalance()).toBe(700);
+    // Verify ACID rollback: The DEBIT ledger entry created at step 5b must be rolled back
+    // Sender balance remains intact at 700, NOT debited to 600
+    const balanceA = await accountA.getBalance();
+    expect(balanceA).toBe(700);
+
+    // Recipient balance remains intact at 300
+    const balanceB = await accountB.getBalance();
+    expect(balanceB).toBe(300);
   });
 
   test('Idempotency Replay: Submitting duplicate key returns cached transaction without duplicate deduction', async () => {
